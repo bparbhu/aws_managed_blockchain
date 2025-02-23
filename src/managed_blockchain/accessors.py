@@ -1,5 +1,9 @@
 import boto3
 import uuid
+import botocore
+from typing import Optional, Dict, List
+
+
 class ManagedBlockchainAccessors:
     def __init__(self):
         self.client = boto3.client('managedblockchain')
@@ -86,33 +90,51 @@ class ManagedBlockchainAccessors:
 
         return None
 
-    def list_accessors(self, network_type: str, max_items: int = 100, page_size: int = 50, starting_token: str = None):
+    def list_accessors(
+            self,
+            max_results: Optional[int] = None,
+            next_token: Optional[str] = None,
+            network_type: Optional[str] = None
+    ) -> Dict:
         """
-        Lists all accessors in the blockchain network with pagination.
+        Retrieves a list of accessors and their properties.
 
-        :param network_type: The blockchain network type.
-        :param max_items: The maximum number of items to return.
-        :param page_size: The number of results per page.
-        :param starting_token: A token to start pagination.
-        :return: A list of accessors with their metadata.
+        :param max_results: The maximum number of accessors to return.
+        :param next_token: A pagination token for retrieving the next set of results.
+        :param network_type: The blockchain network type for which accessors are created.
+        :return: A dictionary containing the list of accessors and the next pagination token.
         """
-        paginator: Paginator = self.client.get_paginator('list_accessors')
+        try:
+            params = {}
+            if max_results:
+                params['MaxResults'] = max_results
+            if next_token:
+                params['NextToken'] = next_token
+            if network_type:
+                params['NetworkType'] = network_type
 
-        pagination_config = {
-            "MaxItems": max_items,
-            "PageSize": page_size
-        }
+            response = self.client.list_accessors(**params)
+            return response
+        except botocore.exceptions.BotoCoreError as e:
+            print(f"Error listing accessors: {e}")
+            return {}
 
-        if starting_token:
-            pagination_config["StartingToken"] = starting_token
+    def get_all_accessors(self, network_type: Optional[str] = None) -> List[Dict]:
+        """
+        Retrieves all accessors available in Managed Blockchain, handling pagination.
 
-        response_iterator = paginator.paginate(
-            NetworkType=network_type,
-            PaginationConfig=pagination_config
-        )
+        :param network_type: The blockchain network type for which accessors are created.
+        :return: A list of all accessors.
+        """
+        accessors = []
+        next_token = None
 
-        accessors_list = []
-        for page in response_iterator:
-            accessors_list.extend(page.get("Accessors", []))
+        while True:
+            response = self.list_accessors(next_token=next_token, network_type=network_type)
+            if 'Accessors' in response:
+                accessors.extend(response['Accessors'])
+            next_token = response.get('NextToken')
+            if not next_token:
+                break
 
-        return accessors_list
+        return accessors

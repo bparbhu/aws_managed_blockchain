@@ -1,5 +1,9 @@
-import boto3
 import uuid
+import boto3
+import botocore
+from typing import Optional, Dict, List
+
+
 class ManagedBlockchainNodes:
     def __init__(self):
         self.client = boto3.client('managedblockchain')
@@ -107,9 +111,62 @@ class ManagedBlockchainNodes:
 
         return None
 
-    def list_nodes(self, network_id: str, member_id: str):
-        """Lists all nodes in a blockchain network."""
-        return self.client.list_nodes(NetworkId=network_id, MemberId=member_id)
+    def list_nodes(
+        self,
+        network_id: str,
+        member_id: Optional[str] = None,
+        status: Optional[str] = None,
+        max_results: Optional[int] = None,
+        next_token: Optional[str] = None
+    ) -> Dict:
+        """
+        Retrieves a list of nodes within a specified network.
+
+        :param network_id: The unique identifier of the network for which to list nodes.
+        :param member_id: The unique identifier of the member who owns the nodes (required for Hyperledger Fabric).
+        :param status: Filter by node status (CREATING, AVAILABLE, FAILED, etc.).
+        :param max_results: The maximum number of nodes to return.
+        :param next_token: A pagination token for retrieving the next set of results.
+        :return: A dictionary containing the list of nodes and the next pagination token.
+        """
+        try:
+            params = {"NetworkId": network_id}
+            if member_id:
+                params["MemberId"] = member_id
+            if status:
+                params["Status"] = status
+            if max_results:
+                params["MaxResults"] = max_results
+            if next_token:
+                params["NextToken"] = next_token
+
+            response = self.client.list_nodes(**params)
+            return response
+        except botocore.exceptions.BotoCoreError as e:
+            print(f"Error listing nodes: {e}")
+            return {}
+
+    def get_all_nodes(self, network_id: str, member_id: Optional[str] = None) -> List[Dict]:
+        """
+        Retrieves all nodes within a specified network, handling pagination.
+
+        :param network_id: The unique identifier of the network.
+        :param member_id: The unique identifier of the member who owns the nodes (required for Hyperledger Fabric).
+        :return: A list of all nodes within the network.
+        """
+        nodes = []
+        next_token = None
+
+        while True:
+            response = self.list_nodes(network_id=network_id, member_id=member_id, next_token=next_token)
+            if 'Nodes' in response:
+                nodes.extend(response['Nodes'])
+            next_token = response.get('NextToken')
+            if not next_token:
+                break
+
+        return nodes
+
 
     def delete_node(self, network_id: str, node_id: str, member_id: str = None):
         """
@@ -146,6 +203,42 @@ class ManagedBlockchainNodes:
 
         return None
 
-    def update_node(self, network_id: str, member_id: str, node_id: str, log_publishing_configuration: dict):
-        """Updates a node's configuration."""
-        return self.client.update_node(NetworkId=network_id, MemberId=member_id, NodeId=node_id, LogPublishingConfiguration=log_publishing_configuration)
+    def update_node(self, network_id: str, member_id: str, node_id: str, enable_chaincode_logs: bool,
+                    enable_peer_logs: bool) -> bool:
+        """
+        Updates the node's log publishing configuration.
+
+        :param network_id: The ID of the Managed Blockchain network.
+        :param member_id: The ID of the member who owns the node.
+        :param node_id: The ID of the node to update.
+        :param enable_chaincode_logs: Boolean flag to enable/disable Chaincode logging.
+        :param enable_peer_logs: Boolean flag to enable/disable Peer logging.
+        :return: True if the update is successful, False otherwise.
+        """
+        try:
+            response = self.client.update_node(
+                NetworkId=network_id,
+                MemberId=member_id,
+                NodeId=node_id,
+                LogPublishingConfiguration={
+                    'Fabric': {
+                        'ChaincodeLogs': {
+                            'Cloudwatch': {
+                                'Enabled': enable_chaincode_logs
+                            }
+                        },
+                        'PeerLogs': {
+                            'Cloudwatch': {
+                                'Enabled': enable_peer_logs
+                            }
+                        }
+                    }
+                }
+            )
+            print(f"Successfully updated node {node_id} in network {network_id}. "
+                  f"Chaincode logging enabled: {enable_chaincode_logs}, Peer logging enabled: {enable_peer_logs}")
+            return True
+        except botocore.exceptions.BotoCoreError as e:
+            print(f"Error updating node: {e}")
+            return False
+
